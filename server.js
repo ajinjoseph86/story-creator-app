@@ -117,20 +117,24 @@ async function updateHistoryEntry(id, patch) {
 
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
-async function fetchWithRetry(url, options, { retries = 4, delayMs = 1500 } = {}) {
+// kie.ai's Claude proxy in particular has shown a high transient-500 rate under longer prompts
+// (observed ~75% per-attempt failure in bursts) — retries/backoff are tuned to survive that.
+async function fetchWithRetry(url, options, { retries = 8, delayMs = 1500, maxDelayMs = 6000 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     try {
       const res = await fetch(url, options);
       if (RETRYABLE_STATUS_CODES.has(res.status) && attempt < retries) {
-        await new Promise((r) => setTimeout(r, delayMs));
+        const wait = Math.min(maxDelayMs, delayMs * 1.5 ** attempt);
+        await new Promise((r) => setTimeout(r, wait));
         continue;
       }
       return res;
     } catch (err) {
       lastErr = err;
       if (attempt < retries) {
-        await new Promise((r) => setTimeout(r, delayMs));
+        const wait = Math.min(maxDelayMs, delayMs * 1.5 ** attempt);
+        await new Promise((r) => setTimeout(r, wait));
       }
     }
   }
