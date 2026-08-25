@@ -20,7 +20,7 @@ const COST_PER_SECOND_USD = 0.140;
 const VALID_DURATIONS = [15, 20, 25, 30];
 const KIE_ROOT = 'https://api.kie.ai';
 const KIE_API_BASE = `${KIE_ROOT}/api/v1`;
-const LLM_MODEL = 'claude-sonnet-5';
+const LLM_MODEL = 'gpt-5-6-luna';
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const SPEND_FILE = path.join(DATA_DIR, 'spend.json');
@@ -190,8 +190,10 @@ async function downloadToFile(url, destPath) {
   await fsp.writeFile(destPath, buf);
 }
 
-async function callClaude(userMessage, maxTokens = 4000) {
-  const res = await fetchWithRetry(`${KIE_ROOT}/claude/v1/messages`, {
+// Uses GPT-5.6 via kie.ai's /codex/v1/responses endpoint. kie.ai's Claude proxy has shown
+// extended outages (confirmed via trivial unrelated test calls), so this app runs on GPT instead.
+async function callClaude(userMessage) {
+  const res = await fetchWithRetry(`${KIE_ROOT}/codex/v1/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${KIE_API_KEY}`,
@@ -199,16 +201,17 @@ async function callClaude(userMessage, maxTokens = 4000) {
     },
     body: JSON.stringify({
       model: LLM_MODEL,
-      messages: [{ role: 'user', content: userMessage }],
       stream: false,
-      max_tokens: maxTokens,
+      input: userMessage,
+      reasoning: { effort: 'medium' },
     }),
   });
   const body = await res.json();
   if (!res.ok) {
     throw new Error(body?.error?.message || body?.msg || `kie.ai LLM call failed (${res.status})`);
   }
-  const textBlock = (body.content || []).find((b) => b.type === 'text' && b.text);
+  const message = (body.output || []).find((o) => o.type === 'message');
+  const textBlock = (message?.content || []).find((c) => c.type === 'output_text' && c.text);
   if (!textBlock) {
     throw new Error('LLM call returned no text.');
   }
@@ -281,7 +284,7 @@ async function writeStoryPrompt({ story, duration, characters, artStyle }) {
     `Story:\n"""\n${story}\n"""\n\n` +
     'Output the JSON now.';
 
-  const raw = await callClaude(userMessage, 4000);
+  const raw = await callClaude(userMessage);
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
   const parsed = JSON.parse(cleaned);
   if (!parsed.prompt || typeof parsed.prompt !== 'string') {
