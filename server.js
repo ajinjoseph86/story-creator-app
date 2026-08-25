@@ -17,7 +17,6 @@ const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
 const SEEDANCE_MODEL = 'bytedance/seedance-2-5';
 const RESOLUTION = '480p';
 const COST_PER_SECOND_USD = 0.140;
-const VALID_DURATIONS = [15, 20, 25, 30];
 const KIE_ROOT = 'https://api.kie.ai';
 const KIE_API_BASE = `${KIE_ROOT}/api/v1`;
 const LLM_MODEL = 'gpt-5-6-luna';
@@ -407,8 +406,8 @@ app.post(
       if (story.length < 20) {
         return res.status(400).json({ error: 'Write a bit more story before generating.' });
       }
-      if (!VALID_DURATIONS.includes(duration)) {
-        return res.status(400).json({ error: 'Choose a valid video length (15, 20, 25, or 30 seconds).' });
+      if (!Number.isInteger(duration) || duration < 4 || duration > 30) {
+        return res.status(400).json({ error: 'Choose a video length between 4 and 30 seconds.' });
       }
 
       const origin = `${req.protocol}://${req.get('host')}`;
