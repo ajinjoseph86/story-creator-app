@@ -18,7 +18,6 @@ const els = {
   },
   story: document.getElementById('story'),
   artStyle: document.getElementById('art-style'),
-  artStylePresets: document.getElementById('art-style-presets'),
   aspectRatio: document.getElementById('aspect-ratio'),
   duration: document.getElementById('duration'),
   durationReadout: document.getElementById('duration-readout'),
@@ -113,22 +112,6 @@ els.duration.addEventListener('input', () => {
   state.duration = Number(els.duration.value);
   els.durationReadout.textContent = `${state.duration} seconds`;
   updateCostBadge();
-});
-
-// ---------- art style ----------
-
-els.artStylePresets.querySelectorAll('.scene-count-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    els.artStylePresets.querySelectorAll('.scene-count-btn').forEach((b) => b.classList.toggle('active', b === btn));
-    els.artStyle.value = btn.dataset.style;
-  });
-});
-
-els.artStyle.addEventListener('input', () => {
-  const matching = [...els.artStylePresets.querySelectorAll('.scene-count-btn')].find(
-    (b) => b.dataset.style.toLowerCase() === els.artStyle.value.trim().toLowerCase()
-  );
-  els.artStylePresets.querySelectorAll('.scene-count-btn').forEach((b) => b.classList.toggle('active', b === matching));
 });
 
 // ---------- budget ----------
