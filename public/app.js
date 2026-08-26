@@ -19,7 +19,9 @@ const els = {
   story: document.getElementById('story'),
   artStyle: document.getElementById('art-style'),
   artStylePresets: document.getElementById('art-style-presets'),
-  durationOptions: document.getElementById('duration-options'),
+  aspectRatio: document.getElementById('aspect-ratio'),
+  duration: document.getElementById('duration'),
+  durationReadout: document.getElementById('duration-readout'),
   generateBtn: document.getElementById('generate-btn'),
   generateBtnText: document.getElementById('generate-btn-text'),
   costBadge: document.getElementById('cost-badge'),
@@ -105,14 +107,12 @@ setupPhotoSlot(els.characterPhotoInputs.character1, (file) => { state.characterP
 setupPhotoSlot(els.characterPhotoInputs.character2, (file) => { state.characterPhotos.character2 = file; });
 setupPhotoSlot(els.characterPhotoInputs.character3, (file) => { state.characterPhotos.character3 = file; });
 
-// ---------- scene count ----------
+// ---------- duration ----------
 
-els.durationOptions.querySelectorAll('.scene-count-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    els.durationOptions.querySelectorAll('.scene-count-btn').forEach((b) => b.classList.toggle('active', b === btn));
-    state.duration = Number(btn.dataset.duration);
-    updateCostBadge();
-  });
+els.duration.addEventListener('input', () => {
+  state.duration = Number(els.duration.value);
+  els.durationReadout.textContent = `${state.duration} seconds`;
+  updateCostBadge();
 });
 
 // ---------- art style ----------
@@ -241,6 +241,7 @@ els.generateBtn.addEventListener('click', async () => {
   formData.append('story', els.story.value.trim());
   formData.append('duration', state.duration);
   formData.append('artStyle', els.artStyle.value.trim() || 'Realistic film');
+  formData.append('aspectRatio', els.aspectRatio.value);
   for (const key of ['character1', 'character2', 'character3']) {
     const mode = state.characterModes[key];
     if (mode === 'none') continue;

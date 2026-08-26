@@ -326,7 +326,7 @@ app.get('/api/status/:id', async (req, res) => {
 
 // Runs after the HTTP response has already been sent — writing the prompt plus generating a
 // 15-30s video easily takes longer than any reverse-proxy timeout would allow.
-async function processStory({ id, story, duration, characters, artStyle, estimatedCost, tempUploadPaths }) {
+async function processStory({ id, story, duration, characters, artStyle, aspectRatio, estimatedCost, tempUploadPaths }) {
   try {
     await updateHistoryEntry(id, { stage: 'writing prompt' });
 
@@ -352,7 +352,7 @@ async function processStory({ id, story, duration, characters, artStyle, estimat
       prompt: promptResult.prompt,
       generate_audio: true,
       resolution: RESOLUTION,
-      aspect_ratio: '9:16',
+      aspect_ratio: aspectRatio,
       duration,
     };
     if (referenceImageUrls.length) {
@@ -403,7 +403,12 @@ app.post(
       const story = (req.body.story || '').trim();
       const duration = parseInt(req.body.duration, 10);
       const artStyle = (req.body.artStyle || '').trim() || 'Realistic film';
+      const aspectRatio = req.body.aspectRatio || '9:16';
 
+      const validAspectRatios = ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9'];
+      if (!validAspectRatios.includes(aspectRatio)) {
+        return res.status(400).json({ error: 'Unknown aspect ratio.' });
+      }
       if (story.length < 20) {
         return res.status(400).json({ error: 'Write a bit more story before generating.' });
       }
@@ -461,6 +466,7 @@ app.post(
         story,
         duration,
         artStyle,
+        aspectRatio,
         status: 'pending',
         stage: 'starting',
         costUsd: estimatedCost,
@@ -469,7 +475,7 @@ app.post(
 
       res.json({ id, status: 'pending' });
 
-      processStory({ id, story, duration, characters, artStyle, estimatedCost, tempUploadPaths });
+      processStory({ id, story, duration, characters, artStyle, aspectRatio, estimatedCost, tempUploadPaths });
     } catch (err) {
       console.error('generate error:', err);
       for (const p of tempUploadPaths) {

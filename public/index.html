@@ -106,13 +106,24 @@
         </div>
 
         <div class="field-group">
+          <h2>Aspect ratio</h2>
+          <select id="aspect-ratio" class="text-input">
+            <option value="9:16" selected>9:16 &mdash; Reels / TikTok / Shorts</option>
+            <option value="16:9">16:9 &mdash; Landscape / YouTube</option>
+            <option value="1:1">1:1 &mdash; Square</option>
+            <option value="4:3">4:3</option>
+            <option value="3:4">3:4</option>
+            <option value="21:9">21:9 &mdash; Cinematic</option>
+          </select>
+        </div>
+
+        <div class="field-group">
           <h2>Video length</h2>
           <p class="hint">One continuous take covering your whole story, timed to fit this length.</p>
-          <div class="scene-count-options" id="duration-options">
-            <button type="button" class="scene-count-btn" data-duration="15">15s</button>
-            <button type="button" class="scene-count-btn active" data-duration="20">20s</button>
-            <button type="button" class="scene-count-btn" data-duration="25">25s</button>
-            <button type="button" class="scene-count-btn" data-duration="30">30s</button>
+          <input type="range" id="duration" class="slider" min="4" max="30" step="1" value="20" />
+          <div class="row-between">
+            <span class="hint" id="duration-readout">20 seconds</span>
+            <span class="hint">4&ndash;30 sec</span>
           </div>
         </div>
 
