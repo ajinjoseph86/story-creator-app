@@ -430,9 +430,6 @@ async function processStory({ id, story, duration, characters, artStyle, aspectR
       input.reference_image_urls = referenceImageUrls;
     }
 
-    // TEMP DEBUG — remove once the "input material format unsupported" issue is diagnosed.
-    await updateHistoryEntry(id, { debugReferenceImageUrls: referenceImageUrls });
-
     const taskId = await kieCreateTask(SEEDANCE_MODEL, input);
     const resultVideoUrl = await kiePollResult(taskId);
 

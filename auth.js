@@ -62,6 +62,10 @@ function applyAuth(app, { password, secret, cookieName = 'app_auth' } = {}) {
 
   app.use((req, res, next) => {
     if (req.path === '/login' || req.path === '/logout') return next();
+    // kie.ai (and other providers) must be able to fetch uploaded/generated media over a plain
+    // unauthenticated request — these paths hold randomly-named files, not sensitive by filename,
+    // so exempting them from the login gate is safe and necessary for generation to work at all.
+    if (req.path.startsWith('/uploads/') || req.path.startsWith('/generated/')) return next();
 
     const cookies = req.headers.cookie || '';
     const match = cookies.match(new RegExp(`${cookieName}=([^;]+)`));
