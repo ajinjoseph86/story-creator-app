@@ -310,8 +310,21 @@ async function writeStoryPrompt({ story, duration, characters, artStyle }) {
     'Output the JSON now.';
 
   const raw = await callClaude(userMessage);
-  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-  const parsed = JSON.parse(cleaned);
+  // Strip markdown code fences, and strip any stray text before/after the JSON object itself —
+  // kie.ai's LLM output has occasionally been seen prefixed with a stray tag (e.g. "<escape>")
+  // ahead of the actual JSON, which is not valid JSON on its own.
+  let cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace > 0 || (lastBrace >= 0 && lastBrace < cleaned.length - 1)) {
+    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (err) {
+    throw new Error(`LLM returned unparseable output: ${err.message}`);
+  }
   if (!parsed.prompt || typeof parsed.prompt !== 'string') {
     throw new Error('LLM did not return a usable prompt.');
   }
