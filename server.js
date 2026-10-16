@@ -195,30 +195,47 @@ async function downloadToFile(url, destPath) {
 
 // Uses GPT-5.6 via kie.ai's /codex/v1/responses endpoint. kie.ai's Claude proxy has shown
 // extended outages (confirmed via trivial unrelated test calls), so this app runs on GPT instead.
-async function callClaude(userMessage) {
-  const res = await fetchWithRetry(`${KIE_ROOT}/codex/v1/responses`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${KIE_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      stream: false,
-      input: userMessage,
-      reasoning: { effort: 'medium' },
-    }),
-  });
-  const body = await res.json();
-  if (!res.ok) {
-    throw new Error(body?.error?.message || body?.msg || `kie.ai LLM call failed (${res.status})`);
+async function callClaude(userMessage, { retries = 2 } = {}) {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const res = await fetchWithRetry(`${KIE_ROOT}/codex/v1/responses`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${KIE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: LLM_MODEL,
+        stream: false,
+        input: userMessage,
+        reasoning: { effort: 'medium' },
+      }),
+    });
+
+    // kie.ai's codex proxy has occasionally returned a malformed/non-JSON body
+    // (a transient gateway glitch, not a code bug) — read as text and retry
+    // on a parse failure rather than crashing the whole generation.
+    const raw = await res.text();
+    let body;
+    try {
+      body = JSON.parse(raw);
+    } catch (parseErr) {
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+        continue;
+      }
+      throw new Error('kie.ai LLM call returned a malformed response after retries. Please try again.');
+    }
+
+    if (!res.ok) {
+      throw new Error(body?.error?.message || body?.msg || `kie.ai LLM call failed (${res.status})`);
+    }
+    const message = (body.output || []).find((o) => o.type === 'message');
+    const textBlock = (message?.content || []).find((c) => c.type === 'output_text' && c.text);
+    if (!textBlock) {
+      throw new Error('LLM call returned no text.');
+    }
+    return textBlock.text.trim();
   }
-  const message = (body.output || []).find((o) => o.type === 'message');
-  const textBlock = (message?.content || []).find((c) => c.type === 'output_text' && c.text);
-  if (!textBlock) {
-    throw new Error('LLM call returned no text.');
-  }
-  return textBlock.text.trim();
 }
 
 // ---------- bus-fight-style single-take prompt generation ----------
