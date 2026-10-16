@@ -310,26 +310,62 @@ async function writeStoryPrompt({ story, duration, characters, artStyle }) {
     `Story:\n"""\n${story}\n"""\n\n` +
     'Output the JSON now.';
 
-  const raw = await callClaude(userMessage);
-  // Strip markdown code fences, and strip any stray text before/after the JSON object itself —
-  // kie.ai's LLM output has occasionally been seen prefixed with a stray tag (e.g. "<escape>")
-  // ahead of the actual JSON, which is not valid JSON on its own.
-  let cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
-  const firstBrace = cleaned.indexOf('{');
-  const lastBrace = cleaned.lastIndexOf('}');
-  if (firstBrace > 0 || (lastBrace >= 0 && lastBrace < cleaned.length - 1)) {
-    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  const maxAttempts = 3;
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let raw;
+    try {
+      raw = await callClaude(userMessage);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      throw lastErr;
+    }
+
+    // Strip markdown code fences, and strip any stray text before/after the JSON object itself —
+    // kie.ai's LLM output has occasionally been seen prefixed with a stray tag (e.g. "<escape>"),
+    // or (rarely) returned a non-JSON message instead of the expected output entirely. Either
+    // way, retry with a fresh call rather than failing the whole generation outright.
+    let cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace === -1 || lastBrace === -1) {
+      lastErr = new Error(`LLM did not return JSON. Got: ${cleaned.slice(0, 200)}`);
+      if (attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      throw lastErr;
+    }
+    if (firstBrace > 0 || lastBrace < cleaned.length - 1) {
+      cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (err) {
+      lastErr = new Error(`LLM returned unparseable output: ${err.message}`);
+      if (attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      throw lastErr;
+    }
+    if (!parsed.prompt || typeof parsed.prompt !== 'string') {
+      lastErr = new Error('LLM did not return a usable prompt.');
+      if (attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+        continue;
+      }
+      throw lastErr;
+    }
+    return { prompt: parsed.prompt, riskNote: parsed.riskNote || null };
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch (err) {
-    throw new Error(`LLM returned unparseable output: ${err.message}`);
-  }
-  if (!parsed.prompt || typeof parsed.prompt !== 'string') {
-    throw new Error('LLM did not return a usable prompt.');
-  }
-  return { prompt: parsed.prompt, riskNote: parsed.riskNote || null };
+  throw lastErr;
 }
 
 // ---------- routes ----------
