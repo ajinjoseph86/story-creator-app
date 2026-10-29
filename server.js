@@ -386,7 +386,12 @@ app.get('/api/budget', async (req, res) => {
 
 app.get('/api/history', async (req, res) => {
   const history = await readJson(HISTORY_FILE, []);
-  res.json(history.filter((entry) => entry.clientId === req.clientId));
+  // Shared gallery: every visitor sees every finished video. Only non-sensitive fields are exposed.
+  res.json(
+    history
+      .filter((entry) => entry.status === 'success')
+      .map(({ id, status, resultUrl, createdAt, duration }) => ({ id, status, resultUrl, createdAt, duration }))
+  );
 });
 
 app.get('/api/status/:id', async (req, res) => {
