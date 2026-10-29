@@ -14,7 +14,7 @@ const app = express();
 app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const KIE_API_KEY = process.env.KIE_API_KEY;
-const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '10.00');
+const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '30.00');
 
 // bytedance/seedance-2-5, 480p, no reference-video input ("no video" rate).
 const SEEDANCE_MODEL = 'bytedance/seedance-2-5';
