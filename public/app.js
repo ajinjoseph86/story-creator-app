@@ -37,9 +37,19 @@ const els = {
 // kie.ai Seedance 2.5, 480p, image-reference (no video input) rate.
 const COST_PER_SECOND_USD = 0.140;
 
+// Mirrors the server: non-realistic styles redraw each uploaded photo first (~$0.12 each).
+const COST_PER_STYLE_IMAGE_USD = 0.12;
+const NON_REALISTIC_STYLE = /anim|3d|\bcg\b|cartoon|stop.?motion|clay|paint|water.?colou?r|pixel|comic|illustrat|sketch|puppet|felt|lego|voxel|\bcel\b|ghibli|pixar|manga/i;
+
 function updateCostBadge() {
-  const cost = state.duration * COST_PER_SECOND_USD;
-  els.costBadge.textContent = `~$${cost.toFixed(2)}`;
+  let cost = state.duration * COST_PER_SECOND_USD;
+  if (NON_REALISTIC_STYLE.test(els.artStyle.value)) {
+    const photos =
+      state.characters.filter((c) => c.mode === 'upload' && c.photo).length +
+      (state.environment.mode === 'upload' && state.environment.photo ? 1 : 0);
+    cost += photos * COST_PER_STYLE_IMAGE_USD;
+  }
+  els.costBadge.textContent = `~${cost.toFixed(2)}`;
 }
 
 // ---------- mode tabs (shared by characters and environment) ----------
@@ -252,7 +262,10 @@ function setLoading(isLoading) {
 }
 
 function updateProgress(entry) {
-  if (entry.stage === 'writing prompt') {
+  if (entry.stage === 'styling characters') {
+    els.progressText.textContent = 'Redrawing your characters in the chosen style…';
+    els.progressBarFill.style.width = '8%';
+  } else if (entry.stage === 'writing prompt') {
     els.progressText.textContent = 'Writing the scene…';
     els.progressBarFill.style.width = '15%';
   } else if (entry.stage === 'generating video') {
@@ -371,6 +384,8 @@ async function pollForResult(id, { intervalMs = 4000, timeoutMs = 40 * 60 * 1000
 }
 
 // ---------- init ----------
+
+['input', 'change', 'click'].forEach((evt) => document.addEventListener(evt, () => setTimeout(updateCostBadge, 0)));
 
 addCharacter();
 

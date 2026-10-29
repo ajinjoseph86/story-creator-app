@@ -20,6 +20,17 @@ const DAILY_BUDGET_USD = parseFloat(process.env.DAILY_BUDGET_USD || '30.00');
 const SEEDANCE_MODEL = 'bytedance/seedance-2-5';
 const RESOLUTION = '480p';
 const COST_PER_SECOND_USD = 0.140;
+
+// For non-realistic art styles, each uploaded photo is first redrawn in that style with Nano Banana Pro
+// (~24 credits = ~$0.12) and the styled image is used as the video reference instead of the real photo,
+// because Seedance otherwise copies the photograph's real-camera look and ignores the requested style.
+const STYLE_IMAGE_MODEL = 'nano-banana-pro';
+const COST_PER_STYLE_IMAGE_USD = 0.12;
+const NON_REALISTIC_STYLE = /anim|3d|\bcg\b|cartoon|stop.?motion|clay|paint|water.?colou?r|pixel|comic|illustrat|sketch|puppet|felt|lego|voxel|\bcel\b|ghibli|pixar|manga/i;
+
+function isRealisticStyle(artStyle) {
+  return !NON_REALISTIC_STYLE.test(artStyle || '');
+}
 const KIE_ROOT = 'https://api.kie.ai';
 const KIE_API_BASE = `${KIE_ROOT}/api/v1`;
 const LLM_MODEL = 'gpt-5-6-luna';
@@ -405,6 +416,7 @@ app.get('/api/budget', async (req, res) => {
     spentUsd: Number(spent.toFixed(4)),
     remainingUsd: Number(Math.max(0, DAILY_BUDGET_USD - spent).toFixed(4)),
     costPerSecondUsd: COST_PER_SECOND_USD,
+    costPerStyleImageUsd: COST_PER_STYLE_IMAGE_USD,
   });
 });
 
@@ -429,8 +441,53 @@ app.get('/api/status/:id', async (req, res) => {
 
 // Runs after the HTTP response has already been sent — writing the prompt plus generating a
 // 15-30s video easily takes longer than any reverse-proxy timeout would allow.
-async function processStory({ id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, tempUploadPaths }) {
+async function createStyledReference({ photoUrl, artStyle, kind, origin, tempUploadPaths }) {
+  const prompt = kind === 'environment'
+    ? 'Redraw the location in the reference photo as a ' + artStyle + ' environment: keep the same layout, architecture, ' +
+      'materials, lighting mood and colour palette, but render it fully in ' + artStyle + ' style (the materials, shading and look ' +
+      'of that medium). It must NOT look like a photograph. No people, no characters, no text.'
+    : 'Redraw the person in the reference photo as a ' + artStyle + ' character. Keep their likeness: face shape, facial features, ' +
+      'hairstyle and hair colour, skin tone, build and outfit. Render them fully in ' + artStyle + ' style (the materials, shading ' +
+      'and proportions of that medium) — NOT a photograph, NOT photorealistic, NOT a real person. Single character, three-quarter ' +
+      'body, plain neutral background, no text.';
+  const taskId = await kieCreateTask(STYLE_IMAGE_MODEL, {
+    prompt,
+    image_input: [photoUrl],
+    aspect_ratio: kind === 'environment' ? 'auto' : '3:4',
+    output_format: 'jpg',
+  });
+  const resultUrl = await kiePollResult(taskId, { timeoutMs: 5 * 60 * 1000, intervalMs: 3000 });
+  const fileName = uuidv4() + '.jpg';
+  const destPath = path.join(UPLOADS_DIR, fileName);
+  await downloadToFile(resultUrl, destPath);
+  tempUploadPaths.push(destPath);
+  return origin + '/uploads/' + fileName;
+}
+
+async function processStory({ id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, origin, tempUploadPaths }) {
   try {
+    let styledCount = 0;
+    if (!isRealisticStyle(artStyle)) {
+      await updateHistoryEntry(id, { stage: 'styling characters' });
+      const jobs = [];
+      for (const ch of characters) {
+        if (ch.mode !== 'upload') continue;
+        jobs.push(
+          createStyledReference({ photoUrl: ch.imageUrl, artStyle, kind: 'character', origin, tempUploadPaths })
+            .then((url) => { ch.imageUrl = url; styledCount += 1; })
+            .catch((err) => console.warn('character styling failed, using the original photo:', err.message))
+        );
+      }
+      if (environment?.mode === 'upload') {
+        jobs.push(
+          createStyledReference({ photoUrl: environment.imageUrl, artStyle, kind: 'environment', origin, tempUploadPaths })
+            .then((url) => { environment.imageUrl = url; styledCount += 1; })
+            .catch((err) => console.warn('environment styling failed, using the original photo:', err.message))
+        );
+      }
+      await Promise.all(jobs);
+    }
+
     await updateHistoryEntry(id, { stage: 'writing prompt' });
 
     let promptResult;
@@ -488,7 +545,8 @@ async function processStory({ id, story, duration, characters, environment, artS
 
     const destFile = `${id}.mp4`;
     await downloadToFile(resultVideoUrl, path.join(GENERATED_DIR, destFile));
-    const newTotal = await addSpend(estimatedCost);
+    const actualCost = duration * COST_PER_SECOND_USD + styledCount * COST_PER_STYLE_IMAGE_USD;
+    const newTotal = await addSpend(actualCost);
 
     await updateHistoryEntry(id, {
       status: 'success',
@@ -590,7 +648,11 @@ app.post(
       }
 
       // ---- budget check BEFORE spending anything ----
-      const estimatedCost = duration * COST_PER_SECOND_USD;
+      let styleImageCount = 0;
+      if (!isRealisticStyle(artStyle)) {
+        styleImageCount = characters.filter((c) => c.mode === 'upload').length + (environment?.mode === 'upload' ? 1 : 0);
+      }
+      const estimatedCost = duration * COST_PER_SECOND_USD + styleImageCount * COST_PER_STYLE_IMAGE_USD;
       const spentToday = await getTodaySpend();
       if (spentToday + estimatedCost > DAILY_BUDGET_USD) {
         return res.status(429).json({
@@ -616,7 +678,7 @@ app.post(
 
       res.json({ id, status: 'pending' });
 
-      processStory({ id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, tempUploadPaths });
+      processStory({ id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, origin, tempUploadPaths });
     } catch (err) {
       console.error('generate error:', err);
       for (const p of tempUploadPaths) {
