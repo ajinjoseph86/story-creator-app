@@ -13,7 +13,7 @@
         <span class="brand-mark">&#9679;</span>
         <div>
           <h1>Story Creator</h1>
-          <p>Write a story, add up to 3 characters, and generate a full multi-scene video.</p>
+          <p>Write a story, add characters and an environment, and generate a full multi-scene video.</p>
         </div>
       </div>
       <div class="budget" id="budget-pill" title="daily budget">
@@ -25,65 +25,30 @@
     <main class="layout">
       <section class="panel controls">
         <div class="field-group">
-          <h2>Character 1 <span class="optional">optional</span></h2>
-          <div class="mode-tabs" data-target="character1">
-            <button type="button" class="mode-tab" data-mode="none">Not used</button>
-            <button type="button" class="mode-tab active" data-mode="upload">Upload photo</button>
-            <button type="button" class="mode-tab" data-mode="describe">Describe</button>
-          </div>
-          <div class="mode-panel" data-panel="character1" data-mode="upload">
-            <div class="photo-slots single" id="character1-slot-wrap">
-              <label class="photo-slot" data-index="0">
-                <input type="file" accept="image/*" class="photo-input" id="character1-photo" />
-                <span class="plus">+</span>
-                <span class="slot-label">Photo</span>
-              </label>
-            </div>
-          </div>
-          <div class="mode-panel hidden" data-panel="character1" data-mode="describe">
-            <textarea id="character1-description" class="text-input" rows="2" placeholder="e.g. a tall man in his 30s, short dark hair, wearing a leather jacket"></textarea>
-          </div>
+          <h2>Characters <span class="optional">optional &middot; up to 8</span></h2>
+          <div id="characters"></div>
+          <button type="button" id="add-character-btn" class="add-btn">+ Add character</button>
         </div>
 
         <div class="field-group">
-          <h2>Character 2 <span class="optional">optional</span></h2>
-          <div class="mode-tabs" data-target="character2">
+          <h2>Environment <span class="optional">optional</span></h2>
+          <p class="hint">The location only &mdash; upload a photo of the place <strong>without any people or characters in it</strong>, or describe it.</p>
+          <div class="mode-tabs" id="environment-tabs">
             <button type="button" class="mode-tab active" data-mode="none">Not used</button>
             <button type="button" class="mode-tab" data-mode="upload">Upload photo</button>
             <button type="button" class="mode-tab" data-mode="describe">Describe</button>
           </div>
-          <div class="mode-panel hidden" data-panel="character2" data-mode="upload">
-            <div class="photo-slots single" id="character2-slot-wrap">
-              <label class="photo-slot" data-index="0">
-                <input type="file" accept="image/*" class="photo-input" id="character2-photo" />
+          <div class="mode-panel hidden" data-env-panel="upload">
+            <div class="photo-slots single">
+              <label class="photo-slot" id="environment-slot">
+                <input type="file" accept="image/*" class="photo-input" id="environment-photo" />
                 <span class="plus">+</span>
-                <span class="slot-label">Photo</span>
+                <span class="slot-label">Environment photo (no people)</span>
               </label>
             </div>
           </div>
-          <div class="mode-panel hidden" data-panel="character2" data-mode="describe">
-            <textarea id="character2-description" class="text-input" rows="2" placeholder="e.g. a young woman with curly red hair, freckles, casual streetwear"></textarea>
-          </div>
-        </div>
-
-        <div class="field-group">
-          <h2>Character 3 <span class="optional">optional</span></h2>
-          <div class="mode-tabs" data-target="character3">
-            <button type="button" class="mode-tab active" data-mode="none">Not used</button>
-            <button type="button" class="mode-tab" data-mode="upload">Upload photo</button>
-            <button type="button" class="mode-tab" data-mode="describe">Describe</button>
-          </div>
-          <div class="mode-panel hidden" data-panel="character3" data-mode="upload">
-            <div class="photo-slots single" id="character3-slot-wrap">
-              <label class="photo-slot" data-index="0">
-                <input type="file" accept="image/*" class="photo-input" id="character3-photo" />
-                <span class="plus">+</span>
-                <span class="slot-label">Photo</span>
-              </label>
-            </div>
-          </div>
-          <div class="mode-panel hidden" data-panel="character3" data-mode="describe">
-            <textarea id="character3-description" class="text-input" rows="2" placeholder="e.g. an elderly man with a grey beard, glasses, wearing a cardigan"></textarea>
+          <div class="mode-panel hidden" data-env-panel="describe">
+            <textarea id="environment-description" class="text-input" rows="2" placeholder="e.g. a rain-soaked neon alley at night, steam rising from grates, wet asphalt"></textarea>
           </div>
         </div>
 

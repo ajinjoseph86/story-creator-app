@@ -66,8 +66,10 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024, files: 3 },
+  limits: { fileSize: 15 * 1024 * 1024, files: 9 },
 });
+
+const MAX_CHARACTERS = 8;
 
 // ---------- date / budget helpers (Asia/Singapore) ----------
 
@@ -265,13 +267,13 @@ If the story has other characters beyond the ones provided, add a short block ma
 
 4. KEY PROPS (only if the story has an object that must stay visually consistent — skip this section entirely if not applicable). For every prop named here, state exactly where it is and what state it's in at frame one (e.g. "the letter is already open on the desk, face-up"), so the model never has to invent or guess its starting position.
 
-5. THE ENVIRONMENT — a rich, specific setting description (architecture/nature/materials, light sources, weather/time), rendered in the target art style. If there's one fussy geometric detail (a door, a specific layout element), lock it by negation (state what it is NOT, e.g. "NOT a rear door"). State the geometry must not change throughout. If the scene would naturally contain any readable text, signage, screens, or labels, state plainly that none of it needs to be legible — describe it only by vague shape/color, never spell out specific words for the model to render.
+5. THE ENVIRONMENT — a rich, specific setting description (architecture/nature/materials, light sources, weather/time), rendered in the target art style. If there's one fussy geometric detail (a door, a specific layout element), lock it by negation (state what it is NOT, e.g. "NOT a rear door"). State the geometry must not change throughout. If an Environment is provided below: for a reference photo (@image number given), build THE ENVIRONMENT from it — "@imageN is the location reference: take the setting, layout, materials and lighting from it, reinterpreted in the [ART STYLE]; it is a place only, no person from it appears" — and keep the geometry faithful to it; for a text description, treat it as the base and enrich it. If the scene would naturally contain any readable text, signage, screens, or labels, state plainly that none of it needs to be legible — describe it only by vague shape/color, never spell out specific words for the model to render.
 
-6. SCENE — where/when, mood, headcount if relevant ("empty except for exactly N people" when it matters), atmospheric detail, and a register line that names BOTH the story's tone AND the art style together (e.g. "Grounded stop-motion animation register, theatrical drama tone" or "Grounded photorealistic cinematography, theatrical drama register" — never describe this register in a way that contradicts the ART STYLE LOCK above).
+6. SCENE — where/when, mood, headcount if relevant ("empty except for exactly N people" when it matters), atmospheric detail, and a register line that names BOTH the story's tone AND the art style together (e.g. "Grounded stop-motion animation register, theatrical drama tone" or, only for realistic film, "Grounded cinematic register, theatrical drama tone" — never use the word photorealistic or realistic in this line for a non-realistic art style, and never describe this register in a way that contradicts the ART STYLE LOCK above).
 
 7. CRITICAL — starting position. State plainly what must already be true in frame one so the model doesn't waste beats on setup: not just the general situation (e.g. "already mid-conversation," "the rain has already started") but the concrete starting state — each character's exact body position/pose, what their hands are doing, and their contact point with any prop or piece of furniture at the very first frame.
 
-8. SCENE STYLE — the physical/performance register appropriate to what actually happens in the story (this is NOT always a fight — could be quiet, comedic, tense, tender; write whatever the story calls for). State in one line the emotional or tonal engine of the scene — which character drives it, and the single moment (if any) where the tone shifts or lands. If there IS physical action, use: "grounded realism, full body weight and visible consequence, no wire work, no superhero physics," and specify who acts first.
+8. SCENE STYLE — the physical/performance register appropriate to what actually happens in the story (this is NOT always a fight — could be quiet, comedic, tense, tender; write whatever the story calls for). State in one line the emotional or tonal engine of the scene — which character drives it, and the single moment (if any) where the tone shifts or lands. If there IS physical action and the art style is realistic film/cinematic, use: "grounded realism, full body weight and visible consequence, no wire work, no superhero physics". For any other art style, describe the action in that style's own motion language instead (e.g. stylised animated weight and timing for 3D animation/anime, on-twos puppet movement for stop motion) and do NOT use the words realism, photoreal or live-action except in the negations. Always specify who acts first.
 
 9. "THIS IS ONE CONTINUOUS [DURATION]-SECOND TAKE, PLAYED IN STRICT CHRONOLOGICAL ORDER — NO FLASHBACKS, NO FLASH-FORWARDS, NO OUT-OF-ORDER CUTS, NO JUMPING BETWEEN LATER AND EARLIER MOMENTS." Then the full timecoded beat-by-beat timeline, beats roughly 1.5-3 seconds each, covering start to finish with NO gaps, in the EXACT order events happen in the story, ending exactly at the target duration. EVERY BEAT MUST ADVANCE THE STORY WITH SOMETHING NEW — a new action, a new piece of information, a new emotional beat, or a new location/detail. Never write two consecutive beats that show substantially the same thing from a slightly different angle, or that repeat/hold on an action already shown; if nothing new is happening, compress or cut that beat rather than padding the timeline. Each beat names the action, the camera behaviour, and any dialogue spoken in that beat, and must follow on directly and unambiguously from the previous beat's ending position/action — never restart, backtrack, or imply an earlier moment. If the story itself contains a time-skip (e.g. "hours later"), do not leave it as an ambiguous jump: write an explicit passage-of-time beat that visually shows the skip happening (e.g. "sun and shadows visibly sweep across the scene while X remains asleep, Y continues without stopping") so the chronology stays unbroken and legible. On any high-impact or emotionally pivotal beat, consider naming an explicit slow-motion percentage (e.g. "SLOW MOTION at 25% speed") if it fits the story. End on a strong final beat (a locked-off wide shot, a freeze on a face, or similar).
 
@@ -295,7 +297,7 @@ HARD RULES:
 - Never sexualize minors. Never stage a real, named public figure's death/self-harm as fabricated fiction — use a fictional stand-in in the same setting if the story implies this.
 - Keep dialogue short and lip-sync-friendly.`;
 
-async function writeStoryPrompt({ story, duration, characters, artStyle }) {
+async function writeStoryPrompt({ story, duration, characters, environment, artStyle }) {
   let nextImageIndex = 1;
   const characterLines = characters.map((ch, i) => {
     if (ch.mode === 'upload') {
@@ -306,11 +308,22 @@ async function writeStoryPrompt({ story, duration, characters, artStyle }) {
     return `${i + 1}. ${ch.label} — described as: ${ch.description}`;
   });
 
+  let environmentLine = '(none provided — invent a fitting setting from the story)';
+  if (environment?.mode === 'upload') {
+    environmentLine =
+      `Reference photo @image${nextImageIndex} — a LOCATION-ONLY reference with no people in it. ` +
+      'Take the setting (layout, architecture, materials, lighting, atmosphere) from it, rebuilt in the art style. ' +
+      'Do not add any person from this photo.';
+  } else if (environment?.mode === 'describe') {
+    environmentLine = `Described as: ${environment.description}`;
+  }
+
   const userMessage =
     `${DIRECTOR_INSTRUCTIONS}\n\n` +
     `Target duration: ${duration} seconds (exactly)\n\n` +
     `Art style: ${artStyle}\n\n` +
     `Characters:\n${characterLines.join('\n') || '(none provided — invent characters as the story implies)'}\n\n` +
+    `Environment:\n${environmentLine}\n\n` +
     `Story:\n"""\n${story}\n"""\n\n` +
     'Output the JSON now.';
 
@@ -416,13 +429,13 @@ app.get('/api/status/:id', async (req, res) => {
 
 // Runs after the HTTP response has already been sent — writing the prompt plus generating a
 // 15-30s video easily takes longer than any reverse-proxy timeout would allow.
-async function processStory({ id, story, duration, characters, artStyle, aspectRatio, estimatedCost, tempUploadPaths }) {
+async function processStory({ id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, tempUploadPaths }) {
   try {
     await updateHistoryEntry(id, { stage: 'writing prompt' });
 
     let promptResult;
     try {
-      promptResult = await writeStoryPrompt({ story, duration, characters, artStyle });
+      promptResult = await writeStoryPrompt({ story, duration, characters, environment, artStyle });
     } catch (err) {
       console.error('prompt generation failed:', err.message);
       throw new Error(`Could not write the story prompt: ${err.message}`);
@@ -434,9 +447,14 @@ async function processStory({ id, story, duration, characters, artStyle, aspectR
       riskNote: promptResult.riskNote,
     });
 
+    // Order must match the @image numbering used in writeStoryPrompt: uploaded characters first,
+    // then the environment photo.
     const referenceImageUrls = characters
       .filter((ch) => ch.mode === 'upload')
       .map((ch) => ch.imageUrl);
+    if (environment?.mode === 'upload') {
+      referenceImageUrls.push(environment.imageUrl);
+    }
 
     const input = {
       prompt: promptResult.prompt,
@@ -494,11 +512,7 @@ async function processStory({ id, story, duration, characters, artStyle, aspectR
 
 app.post(
   '/api/generate',
-  upload.fields([
-    { name: 'character1Photo', maxCount: 1 },
-    { name: 'character2Photo', maxCount: 1 },
-    { name: 'character3Photo', maxCount: 1 },
-  ]),
+  upload.any(),
   async (req, res) => {
     const tempUploadPaths = [];
     try {
@@ -524,27 +538,31 @@ app.post(
 
       const origin = `${req.protocol}://${req.get('host')}`;
       const characters = [];
+      const fileFor = (fieldName) => (req.files || []).find((f) => f.fieldname === fieldName);
+      const saveReferenceImage = async (file) => {
+        const fileName = `${uuidv4()}.jpg`;
+        const destPath = path.join(UPLOADS_DIR, fileName);
+        await sharp(file.buffer)
+          .rotate()
+          .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 88 })
+          .toFile(destPath);
+        tempUploadPaths.push(destPath);
+        return `${origin}/uploads/${fileName}`;
+      };
 
-      for (let i = 1; i <= 3; i += 1) {
+      for (let i = 1; i <= MAX_CHARACTERS; i += 1) {
         const rawMode = req.body[`character${i}Mode`];
         const mode = rawMode === 'describe' ? 'describe' : rawMode === 'upload' ? 'upload' : null;
         if (!mode) continue; // this character slot wasn't used
 
         const label = `CHARACTER ${i}`;
         if (mode === 'upload') {
-          const file = req.files?.[`character${i}Photo`]?.[0];
+          const file = fileFor(`character${i}Photo`);
           if (!file) {
             return res.status(400).json({ error: `Upload a photo for Character ${i}, or switch it to Describe.` });
           }
-          const fileName = `${uuidv4()}.jpg`;
-          const destPath = path.join(UPLOADS_DIR, fileName);
-          await sharp(file.buffer)
-            .rotate()
-            .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-            .jpeg({ quality: 88 })
-            .toFile(destPath);
-          tempUploadPaths.push(destPath);
-          characters.push({ label, mode: 'upload', imageUrl: `${origin}/uploads/${fileName}` });
+          characters.push({ label, mode: 'upload', imageUrl: await saveReferenceImage(file) });
         } else {
           const description = (req.body[`character${i}Description`] || '').trim();
           if (!description) {
@@ -552,6 +570,23 @@ app.post(
           }
           characters.push({ label, mode: 'describe', description });
         }
+      }
+
+      // Environment: a photo of the location (no people in it), a text description, or nothing.
+      let environment = null;
+      const envMode = req.body.environmentMode;
+      if (envMode === 'upload') {
+        const file = fileFor('environmentPhoto');
+        if (!file) {
+          return res.status(400).json({ error: 'Upload an environment photo, or switch it to Describe/Not used.' });
+        }
+        environment = { mode: 'upload', imageUrl: await saveReferenceImage(file) };
+      } else if (envMode === 'describe') {
+        const description = (req.body.environmentDescription || '').trim();
+        if (!description) {
+          return res.status(400).json({ error: 'Describe the environment, or switch it to Upload/Not used.' });
+        }
+        environment = { mode: 'describe', description };
       }
 
       // ---- budget check BEFORE spending anything ----
@@ -581,7 +616,7 @@ app.post(
 
       res.json({ id, status: 'pending' });
 
-      processStory({ id, story, duration, characters, artStyle, aspectRatio, estimatedCost, tempUploadPaths });
+      processStory({ id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, tempUploadPaths });
     } catch (err) {
       console.error('generate error:', err);
       for (const p of tempUploadPaths) {

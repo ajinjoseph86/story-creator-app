@@ -462,3 +462,44 @@ body {
   background: rgba(0,0,0,0.85);
   color: var(--accent);
 }
+
+.character-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.character-title {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.remove-character-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.remove-character-btn:hover { border-color: #ff6b6b; color: #ff6b6b; }
+
+.add-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.add-btn:hover:not(:disabled) { border-color: var(--accent-dim); color: var(--text); }
+.add-btn:disabled { opacity: 0.5; cursor: not-allowed; }

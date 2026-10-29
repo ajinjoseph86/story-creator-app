@@ -1,21 +1,19 @@
+const MAX_CHARACTERS = 8;
+
 const state = {
-  characterModes: { character1: 'upload', character2: 'none', character3: 'none' },
-  characterPhotos: { character1: null, character2: null, character3: null },
+  characters: [], // { id, mode: 'upload' | 'describe', photo: File | null, el: HTMLElement }
+  nextCharacterId: 1,
+  environment: { mode: 'none', photo: null },
   duration: 20,
   currentVideoId: null,
 };
 
 const els = {
-  characterPhotoInputs: {
-    character1: document.getElementById('character1-photo'),
-    character2: document.getElementById('character2-photo'),
-    character3: document.getElementById('character3-photo'),
-  },
-  characterDescriptions: {
-    character1: document.getElementById('character1-description'),
-    character2: document.getElementById('character2-description'),
-    character3: document.getElementById('character3-description'),
-  },
+  charactersWrap: document.getElementById('characters'),
+  addCharacterBtn: document.getElementById('add-character-btn'),
+  environmentTabs: document.getElementById('environment-tabs'),
+  environmentPhoto: document.getElementById('environment-photo'),
+  environmentDescription: document.getElementById('environment-description'),
   story: document.getElementById('story'),
   artStyle: document.getElementById('art-style'),
   aspectRatio: document.getElementById('aspect-ratio'),
@@ -44,21 +42,16 @@ function updateCostBadge() {
   els.costBadge.textContent = `~$${cost.toFixed(2)}`;
 }
 
-// ---------- character mode tabs ----------
+// ---------- mode tabs (shared by characters and environment) ----------
 
-document.querySelectorAll('.mode-tabs').forEach((tabs) => {
-  const target = tabs.dataset.target;
-  tabs.querySelectorAll('.mode-tab').forEach((btn) => {
+function bindModeTabs(tabsEl, onChange) {
+  tabsEl.querySelectorAll('.mode-tab').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const mode = btn.dataset.mode;
-      tabs.querySelectorAll('.mode-tab').forEach((b) => b.classList.toggle('active', b === btn));
-      document.querySelectorAll(`.mode-panel[data-panel="${target}"]`).forEach((panel) => {
-        panel.classList.toggle('hidden', panel.dataset.mode !== mode);
-      });
-      state.characterModes[target] = mode;
+      tabsEl.querySelectorAll('.mode-tab').forEach((b) => b.classList.toggle('active', b === btn));
+      onChange(btn.dataset.mode);
     });
   });
-});
+}
 
 // ---------- photo slots ----------
 
@@ -102,9 +95,77 @@ function renderSlot(slot, file) {
   slot.appendChild(removeBtn);
 }
 
-setupPhotoSlot(els.characterPhotoInputs.character1, (file) => { state.characterPhotos.character1 = file; });
-setupPhotoSlot(els.characterPhotoInputs.character2, (file) => { state.characterPhotos.character2 = file; });
-setupPhotoSlot(els.characterPhotoInputs.character3, (file) => { state.characterPhotos.character3 = file; });
+// ---------- characters (add as many as you like, up to MAX_CHARACTERS) ----------
+
+function renumberCharacters() {
+  state.characters.forEach((ch, i) => {
+    ch.el.querySelector('.character-title').textContent = 'Character ' + (i + 1);
+  });
+  els.addCharacterBtn.disabled = state.characters.length >= MAX_CHARACTERS;
+  els.addCharacterBtn.textContent =
+    state.characters.length >= MAX_CHARACTERS ? 'Maximum of ' + MAX_CHARACTERS + ' characters' : '+ Add character';
+}
+
+function addCharacter() {
+  if (state.characters.length >= MAX_CHARACTERS) return;
+
+  const ch = { id: state.nextCharacterId, mode: 'upload', photo: null, el: null };
+  state.nextCharacterId += 1;
+
+  const card = document.createElement('div');
+  card.className = 'character-card';
+  card.innerHTML =
+    '<div class="row-between">' +
+      '<h3 class="character-title"></h3>' +
+      '<button type="button" class="remove-character-btn" title="Remove this character">&times;</button>' +
+    '</div>' +
+    '<div class="mode-tabs">' +
+      '<button type="button" class="mode-tab active" data-mode="upload">Upload photo</button>' +
+      '<button type="button" class="mode-tab" data-mode="describe">Describe</button>' +
+    '</div>' +
+    '<div class="mode-panel" data-mode="upload">' +
+      '<div class="photo-slots single">' +
+        '<label class="photo-slot">' +
+          '<input type="file" accept="image/*" class="photo-input" />' +
+          '<span class="plus">+</span>' +
+          '<span class="slot-label">Photo</span>' +
+        '</label>' +
+      '</div>' +
+    '</div>' +
+    '<div class="mode-panel hidden" data-mode="describe">' +
+      '<textarea class="text-input character-description" rows="2" placeholder="e.g. a tall man in his 30s, short dark hair, wearing a leather jacket"></textarea>' +
+    '</div>';
+
+  ch.el = card;
+  bindModeTabs(card.querySelector('.mode-tabs'), (mode) => {
+    ch.mode = mode;
+    card.querySelectorAll('.mode-panel').forEach((panel) => {
+      panel.classList.toggle('hidden', panel.dataset.mode !== mode);
+    });
+  });
+  setupPhotoSlot(card.querySelector('.photo-input'), (file) => { ch.photo = file; });
+  card.querySelector('.remove-character-btn').addEventListener('click', () => {
+    state.characters = state.characters.filter((c) => c !== ch);
+    card.remove();
+    renumberCharacters();
+  });
+
+  state.characters.push(ch);
+  els.charactersWrap.appendChild(card);
+  renumberCharacters();
+}
+
+els.addCharacterBtn.addEventListener('click', addCharacter);
+
+// ---------- environment ----------
+
+bindModeTabs(els.environmentTabs, (mode) => {
+  state.environment.mode = mode;
+  document.querySelectorAll('[data-env-panel]').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.envPanel !== mode);
+  });
+});
+setupPhotoSlot(els.environmentPhoto, (file) => { state.environment.photo = file; });
 
 // ---------- duration ----------
 
@@ -206,15 +267,20 @@ function updateProgress(entry) {
 els.generateBtn.addEventListener('click', async () => {
   showError('');
 
-  const anyCharacterUsed = ['character1', 'character2', 'character3'].some((k) => state.characterModes[k] !== 'none');
-  for (const key of ['character1', 'character2', 'character3']) {
-    const mode = state.characterModes[key];
-    if (mode === 'upload' && !state.characterPhotos[key]) {
-      return showError(`Upload a photo for ${key.replace('character', 'Character ')}, or switch it to Describe/Not used.`);
+  for (const [i, ch] of state.characters.entries()) {
+    const label = 'Character ' + (i + 1);
+    if (ch.mode === 'upload' && !ch.photo) {
+      return showError('Upload a photo for ' + label + ', switch it to Describe, or remove it.');
     }
-    if (mode === 'describe' && !els.characterDescriptions[key].value.trim()) {
-      return showError(`Describe ${key.replace('character', 'Character ')}, or switch it to Upload/Not used.`);
+    if (ch.mode === 'describe' && !ch.el.querySelector('.character-description').value.trim()) {
+      return showError('Describe ' + label + ', switch it to Upload, or remove it.');
     }
+  }
+  if (state.environment.mode === 'upload' && !state.environment.photo) {
+    return showError('Upload an environment photo, or switch the environment to Describe/Not used.');
+  }
+  if (state.environment.mode === 'describe' && !els.environmentDescription.value.trim()) {
+    return showError('Describe the environment, or switch it to Upload/Not used.');
   }
   if (!els.story.value.trim() || els.story.value.trim().length < 20) {
     return showError('Write a bit more of your story first.');
@@ -225,15 +291,21 @@ els.generateBtn.addEventListener('click', async () => {
   formData.append('duration', state.duration);
   formData.append('artStyle', els.artStyle.value.trim() || 'Realistic film');
   formData.append('aspectRatio', els.aspectRatio.value);
-  for (const key of ['character1', 'character2', 'character3']) {
-    const mode = state.characterModes[key];
-    if (mode === 'none') continue;
-    formData.append(`${key}Mode`, mode);
-    if (mode === 'upload') {
-      formData.append(`${key}Photo`, state.characterPhotos[key]);
+  state.characters.forEach((ch, i) => {
+    const n = i + 1;
+    formData.append('character' + n + 'Mode', ch.mode);
+    if (ch.mode === 'upload') {
+      formData.append('character' + n + 'Photo', ch.photo);
     } else {
-      formData.append(`${key}Description`, els.characterDescriptions[key].value.trim());
+      formData.append('character' + n + 'Description', ch.el.querySelector('.character-description').value.trim());
     }
+  });
+  if (state.environment.mode === 'upload') {
+    formData.append('environmentMode', 'upload');
+    formData.append('environmentPhoto', state.environment.photo);
+  } else if (state.environment.mode === 'describe') {
+    formData.append('environmentMode', 'describe');
+    formData.append('environmentDescription', els.environmentDescription.value.trim());
   }
 
   setLoading(true);
@@ -299,6 +371,8 @@ async function pollForResult(id, { intervalMs = 4000, timeoutMs = 40 * 60 * 1000
 }
 
 // ---------- init ----------
+
+addCharacter();
 
 updateCostBadge();
 refreshBudget();
