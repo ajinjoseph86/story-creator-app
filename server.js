@@ -435,6 +435,7 @@ app.get('/api/history', async (req, res) => {
         aspectRatio: e.aspectRatio,
         artStyle: e.artStyle,
         promptText: e.story,
+        generationSeconds: e.generationSeconds,
       }))
   );
 });
@@ -454,6 +455,7 @@ app.get('/api/history/:id', async (req, res) => {
     promptText: e.story,
     finalPrompt: e.finalPrompt,
     inputs: e.inputs,
+    generationSeconds: e.generationSeconds,
   });
 });
 
@@ -505,6 +507,7 @@ async function createStyledReference({ photoUrl, artStyle, kind, origin, tempUpl
 
 async function processStory({ id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, origin, tempUploadPaths }) {
   try {
+    const startedAt = Date.now();
     let styledCount = 0;
     if (!isRealisticStyle(artStyle)) {
       await updateHistoryEntry(id, { stage: 'styling characters' });
@@ -593,6 +596,8 @@ async function processStory({ id, story, duration, characters, environment, artS
       stage: 'done',
       resultUrl: `/generated/${destFile}`,
       spentTodayUsd: Number(newTotal.toFixed(4)),
+      finishedAt: new Date().toISOString(),
+      generationSeconds: Math.round((Date.now() - startedAt) / 1000),
     });
   } catch (err) {
     console.error('story generation error:', err);
@@ -770,6 +775,8 @@ async function recoverInterruptedJobs() {
           stage: 'done',
           resultUrl: '/generated/' + destFile,
           spentTodayUsd: Number(total.toFixed(4)),
+          finishedAt: new Date().toISOString(),
+          generationSeconds: Math.round((Date.now() - Date.parse(e.createdAt)) / 1000),
         });
       } catch (err) {
         await updateHistoryEntry(e.id, {

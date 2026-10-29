@@ -223,11 +223,20 @@ function renderInputs(inputs) {
   return '<h3>Used inputs</h3><div class="input-grid">' + parts.join('') + '</div>';
 }
 
+function formatTaken(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  if (seconds < 60) return 'made in ' + seconds + ' sec';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return 'made in ' + m + ' min' + (s ? ' ' + s + ' sec' : '');
+}
+
 function renderPromptDetails(info) {
   const meta = [
     info.artStyle,
     info.aspectRatio,
     info.duration ? info.duration + 's' : '',
+    formatTaken(info.generationSeconds),
     info.createdAt ? new Date(info.createdAt).toLocaleString() : '',
   ].filter(Boolean).map(escapeHtml).join(' · ');
   const finalBlock = info.finalPrompt
@@ -256,6 +265,7 @@ async function showPromptDetails(entry) {
     duration: entry.duration,
     createdAt: entry.createdAt,
     inputs: entry.inputs,
+    generationSeconds: entry.generationSeconds,
   });
   if (entry.finalPrompt || entry.finalPrompt) return;
   try {
@@ -290,7 +300,7 @@ function renderGallery(history) {
   done.forEach((entry) => {
     const item = document.createElement('div');
     item.className = 'gallery-item';
-    item.title = entry.promptText || '';
+    item.title = [entry.promptText || '', formatTaken(entry.generationSeconds)].filter(Boolean).join('\n');
     item.innerHTML = `
       <video src="${entry.resultUrl}" muted loop playsinline></video>
       <div class="gallery-caption">${escapeHtml(entry.promptText || '')}</div>
