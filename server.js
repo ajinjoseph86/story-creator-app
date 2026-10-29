@@ -105,7 +105,7 @@ async function addSpend(amount) {
 async function appendHistory(entry) {
   const history = await readJson(HISTORY_FILE, []);
   history.unshift(entry);
-  await writeJson(HISTORY_FILE, history.slice(0, 200));
+  await writeJson(HISTORY_FILE, history);
   return history;
 }
 
