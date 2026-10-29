@@ -269,9 +269,24 @@ els.generateBtn.addEventListener('click', async () => {
 
 async function pollForResult(id, { intervalMs = 4000, timeoutMs = 40 * 60 * 1000 } = {}) {
   const started = Date.now();
+  let transientFailures = 0;
   while (Date.now() - started < timeoutMs) {
-    const res = await fetch(`/api/status/${id}`);
-    const entry = await res.json();
+    // The host can briefly return an HTML error page (e.g. during a redeploy or restart).
+    // Treat that as a transient blip and keep polling instead of failing the whole generation.
+    let res;
+    let entry;
+    try {
+      res = await fetch(`/api/status/${id}`);
+      entry = await res.json();
+      transientFailures = 0;
+    } catch (err) {
+      transientFailures += 1;
+      if (transientFailures > 45) {
+        throw new Error('Lost connection to the server while generating. Check the gallery in a minute — your video may still finish.');
+      }
+      await new Promise((r) => setTimeout(r, intervalMs));
+      continue;
+    }
     if (!res.ok) {
       throw new Error(entry.error || 'Could not check generation status.');
     }
