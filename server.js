@@ -426,8 +426,34 @@ app.get('/api/history', async (req, res) => {
   res.json(
     history
       .filter((entry) => entry.status === 'success')
-      .map(({ id, status, resultUrl, createdAt, duration }) => ({ id, status, resultUrl, createdAt, duration }))
+      .map((e) => ({
+        id: e.id,
+        status: e.status,
+        resultUrl: e.resultUrl,
+        createdAt: e.createdAt,
+        duration: e.duration,
+        aspectRatio: e.aspectRatio,
+        artStyle: e.artStyle,
+        promptText: e.story,
+      }))
   );
+});
+
+// Full details (including the long written prompt) for one finished video, fetched when it is opened.
+app.get('/api/history/:id', async (req, res) => {
+  const history = await readJson(HISTORY_FILE, []);
+  const e = history.find((h) => h.id === req.params.id && h.status === 'success');
+  if (!e) return res.status(404).json({ error: 'Not found.' });
+  res.json({
+    id: e.id,
+    resultUrl: e.resultUrl,
+    createdAt: e.createdAt,
+    duration: e.duration,
+    aspectRatio: e.aspectRatio,
+    artStyle: e.artStyle,
+    promptText: e.story,
+    finalPrompt: e.finalPrompt,
+  });
 });
 
 app.get('/api/status/:id', async (req, res) => {
