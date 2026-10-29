@@ -556,6 +556,7 @@ async function processStory({ id, story, duration, characters, environment, artS
     for (let attempt = 0; ; attempt += 1) {
       try {
         const taskId = await kieCreateTask(SEEDANCE_MODEL, input);
+        await updateHistoryEntry(id, { taskId });
         resultVideoUrl = await kiePollResult(taskId);
         break;
       } catch (err) {
@@ -724,8 +725,49 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong.' });
 });
 
+// If the server restarts (e.g. a redeploy) while videos are being made, the in-memory job dies but the
+// kie.ai task keeps running. On boot: resume any job that already has a kie.ai task id, and fail the rest
+// cleanly so the page shows a clear message instead of waiting forever.
+async function recoverInterruptedJobs() {
+  const history = await readJson(HISTORY_FILE, []);
+  for (const e of history.filter((h) => h.status === 'pending')) {
+    if (!e.taskId) {
+      await updateHistoryEntry(e.id, {
+        status: 'fail',
+        stage: 'failed',
+        error: 'This generation was interrupted by a server restart before the video was started. Please try again.',
+      });
+      continue;
+    }
+    console.log('Resuming interrupted generation ' + e.id + ' (kie.ai task ' + e.taskId + ')');
+    (async () => {
+      try {
+        const videoUrl = await kiePollResult(e.taskId);
+        const latest = (await readJson(HISTORY_FILE, [])).find((h) => h.id === e.id);
+        if (!latest || latest.status === 'success') return;
+        const destFile = e.id + '.mp4';
+        await downloadToFile(videoUrl, path.join(GENERATED_DIR, destFile));
+        const total = await addSpend(e.costUsd || 0);
+        await updateHistoryEntry(e.id, {
+          status: 'success',
+          stage: 'done',
+          resultUrl: '/generated/' + destFile,
+          spentTodayUsd: Number(total.toFixed(4)),
+        });
+      } catch (err) {
+        await updateHistoryEntry(e.id, {
+          status: 'fail',
+          stage: 'failed',
+          error: err.message || 'Generation failed after a server restart.',
+        });
+      }
+    })();
+  }
+}
+
 app.listen(PORT, () => {
   console.log(`Story Creator app running at http://localhost:${PORT}`);
+  recoverInterruptedJobs().catch((err) => console.error('recovery failed:', err.message));
   if (!KIE_API_KEY) {
     console.warn('WARNING: KIE_API_KEY is not set. Copy .env.example to .env and add your kie.ai API key.');
   }
