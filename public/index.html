@@ -125,6 +125,23 @@
     </section>
   </div>
 
+
+  <div class="modal hidden" id="delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+    <div class="modal-card">
+      <h3 id="delete-title">Delete this creation?</h3>
+      <p class="modal-warn">This permanently removes the video and its saved photos from the server. It cannot be undone.</p>
+      <div class="modal-summary" id="delete-summary"></div>
+      <label class="modal-label">Type <b>DELETE</b> to confirm
+        <input type="text" id="delete-confirm-text" class="text-input" autocomplete="off" />
+      </label>
+      <p class="error-text" id="delete-error"></p>
+      <div class="modal-actions">
+        <button type="button" id="delete-cancel" class="modal-btn">Cancel</button>
+        <button type="button" id="delete-confirm" class="modal-btn danger" disabled>Delete permanently</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

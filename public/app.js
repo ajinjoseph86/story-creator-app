@@ -245,8 +245,11 @@ function renderPromptDetails(info) {
     : '';
   promptDetailsEl.innerHTML =
     '<h3>Prompt</h3><div class="prompt-meta">' + meta + '</div>' +
-    '<p class="prompt-text">' + escapeHtml(info.promptText || '') + '</p>' + renderInputs(info.inputs) + finalBlock;
+    '<p class="prompt-text">' + escapeHtml(info.promptText || '') + '</p>' + renderInputs(info.inputs) + finalBlock +
+    '<button type="button" class="delete-link" id="open-delete">Delete this creation…</button>';
   promptDetailsEl.classList.remove('hidden');
+  const openDelete = document.getElementById('open-delete');
+  if (openDelete && info.id) openDelete.addEventListener('click', () => openDeleteModal(info));
   const copyBtn = document.getElementById('copy-final-prompt');
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
@@ -258,6 +261,7 @@ function renderPromptDetails(info) {
 async function showPromptDetails(entry) {
   if (!promptDetailsEl) return;
   renderPromptDetails({
+    id: entry.id,
     promptText: entry.promptText || entry.story,
     finalPrompt: entry.finalPrompt || entry.finalPrompt,
     artStyle: entry.artStyle,
@@ -277,6 +281,78 @@ async function showPromptDetails(entry) {
     // non-fatal: the short prompt is already shown
   }
 }
+
+// ---------- delete (admin password + typed confirmation) ----------
+
+const deleteEls = {
+  modal: document.getElementById('delete-modal'),
+  summary: document.getElementById('delete-summary'),
+  text: document.getElementById('delete-confirm-text'),
+  error: document.getElementById('delete-error'),
+  cancel: document.getElementById('delete-cancel'),
+  confirm: document.getElementById('delete-confirm'),
+};
+let deleteTargetId = null;
+
+function openDeleteModal(info) {
+  deleteTargetId = info.id;
+  deleteEls.summary.textContent = (info.promptText || '(no prompt)') + '\n' +
+    [info.artStyle, info.aspectRatio, info.duration ? info.duration + 's' : ''].filter(Boolean).join(' · ');
+  deleteEls.text.value = '';
+  deleteEls.error.textContent = '';
+  deleteEls.confirm.disabled = true;
+  deleteEls.modal.classList.remove('hidden');
+  deleteEls.text.focus();
+}
+
+function closeDeleteModal() {
+  deleteEls.modal.classList.add('hidden');
+  deleteTargetId = null;
+}
+
+function refreshDeleteButton() {
+  deleteEls.confirm.disabled = deleteEls.text.value !== 'DELETE';
+}
+
+deleteEls.text.addEventListener('input', refreshDeleteButton);
+deleteEls.cancel.addEventListener('click', closeDeleteModal);
+deleteEls.modal.addEventListener('click', (e) => { if (e.target === deleteEls.modal) closeDeleteModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDeleteModal(); });
+
+deleteEls.confirm.addEventListener('click', async () => {
+  const id = deleteTargetId;
+  if (!id) return;
+  deleteEls.confirm.disabled = true;
+  deleteEls.error.textContent = '';
+  try {
+    const res = await fetch('/api/history/' + id, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: deleteEls.text.value }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      deleteEls.error.textContent = data.error || 'Could not delete.';
+      refreshDeleteButton();
+      return;
+    }
+    closeDeleteModal();
+    if (state.currentVideoId === id) {
+      els.previewVideo.pause();
+      els.previewVideo.removeAttribute('src');
+      els.previewVideo.load();
+      els.previewVideo.classList.add('hidden');
+      els.previewPlaceholder.classList.remove('hidden');
+      els.downloadBtn.classList.add('hidden');
+      if (promptDetailsEl) promptDetailsEl.classList.add('hidden');
+      state.currentVideoId = null;
+    }
+    await refreshHistory();
+  } catch (err) {
+    deleteEls.error.textContent = 'Network problem. Try again.';
+    refreshDeleteButton();
+  }
+});
 
 // ---------- history / gallery ----------
 

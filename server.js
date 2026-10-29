@@ -747,6 +747,44 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong.' });
 });
 
+// ---------- delete a creation (login required; must type DELETE to confirm) ----------
+
+app.delete('/api/history/:id', async (req, res) => {
+  const { confirm } = req.body || {};
+  if (confirm !== 'DELETE') {
+    return res.status(400).json({ error: 'Type DELETE to confirm.' });
+  }
+  const id = req.params.id;
+  if (!/^[0-9a-f-]{36}$/i.test(id)) {
+    return res.status(400).json({ error: 'Bad id.' });
+  }
+  const history = await readJson(HISTORY_FILE, []);
+  const entry = history.find((h) => h.id === id);
+  if (!entry) {
+    return res.status(404).json({ error: 'Creation not found.' });
+  }
+  if (entry.status === 'pending') {
+    return res.status(409).json({ error: 'This creation is still generating. Wait for it to finish.' });
+  }
+  const files = [id + '.mp4'];
+  const inputs = entry.inputs || {};
+  const thumbs = [
+    ...(inputs.characters || []).map((c) => c.thumbUrl),
+    inputs.environment && inputs.environment.thumbUrl,
+    ...(inputs.characterThumbs || []),
+    ...(inputs.productThumbs || []),
+  ].filter(Boolean);
+  for (const t of thumbs) {
+    const base = path.basename(t);
+    if (/^in-[0-9a-f-]+\.jpg$/i.test(base)) files.push(base);
+  }
+  for (const f of files) {
+    await fsp.unlink(path.join(GENERATED_DIR, f)).catch(() => {});
+  }
+  await writeJson(HISTORY_FILE, history.filter((h) => h.id !== id));
+  res.json({ ok: true });
+});
+
 // If the server restarts (e.g. a redeploy) while videos are being made, the in-memory job dies but the
 // kie.ai task keeps running. On boot: resume any job that already has a kie.ai task id, and fail the rest
 // cleanly so the page shows a clear message instead of waiting forever.
