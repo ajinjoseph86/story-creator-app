@@ -371,6 +371,16 @@ async function writeStoryPrompt({ story, duration, characters, artStyle }) {
   throw lastErr;
 }
 
+async function condensePrompt(prompt, targetChars) {
+  const message =
+    'Rewrite the following Seedance video prompt so it is at most ' + targetChars + ' characters, ' +
+    'keeping every section header, every @image tag, the art style lock wording, all dialogue lines with their timecodes, ' +
+    'and the full chronological beat-by-beat timeline (merge or shorten descriptive wording, never drop a beat or change the order). ' +
+    'Output ONLY the rewritten prompt as plain text — no JSON, no commentary.\n\n' + prompt;
+  const out = await callClaude(message);
+  return out.replace(/^```\w*\s*/, '').replace(/```\s*$/, '').trim();
+}
+
 // ---------- routes ----------
 
 app.get('/api/budget', async (req, res) => {
@@ -438,8 +448,24 @@ async function processStory({ id, story, duration, characters, artStyle, aspectR
       input.reference_image_urls = referenceImageUrls;
     }
 
-    const taskId = await kieCreateTask(SEEDANCE_MODEL, input);
-    const resultVideoUrl = await kiePollResult(taskId);
+    // Seedance rejects over-long prompts (more likely on 25-30s timelines). If that happens,
+    // condense the prompt and retry rather than failing the user's generation.
+    let resultVideoUrl;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const taskId = await kieCreateTask(SEEDANCE_MODEL, input);
+        resultVideoUrl = await kiePollResult(taskId);
+        break;
+      } catch (err) {
+        const msg = err.message || '';
+        const tooLong = /(text|prompt)[^.]*length|length[^.]*maximum|too long/i.test(msg) && !/hourly|points|credits/i.test(msg);
+        if (!tooLong || attempt >= 2) throw err;
+        console.warn(`Seedance rejected a ${input.prompt.length}-char prompt (${err.message}); condensing and retrying.`);
+        await updateHistoryEntry(id, { stage: 'writing prompt' });
+        input.prompt = await condensePrompt(input.prompt, Math.floor(input.prompt.length * 0.6));
+        await updateHistoryEntry(id, { stage: 'generating video', finalPrompt: input.prompt });
+      }
+    }
 
     const destFile = `${id}.mp4`;
     await downloadToFile(resultVideoUrl, path.join(GENERATED_DIR, destFile));
