@@ -1,25 +1,58 @@
 const crypto = require('crypto');
 const express = require('express');
 
-function makeToken(secret) {
-  return crypto.createHmac('sha256', secret).update('authenticated').digest('hex');
+const sha = (value) => crypto.createHash('sha256').update(String(value)).digest();
+
+function hmac(secret, value) {
+  return crypto.createHmac('sha256', secret).update(value).digest('hex');
 }
 
-// Simple shared-password gate — no accounts/database. Protects the app from being
-// publicly accessible to anyone with the link.
-function applyAuth(app, { password, secret, cookieName = 'app_auth' } = {}) {
-  if (!password) {
-    console.warn('APP_PASSWORD not set — login gate is disabled, app is publicly accessible.');
+function safeEqual(a, b) {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+// Admin password + a list of people, each with their own password and a total spending allowance.
+//   ADMIN_PASSWORD (or the older APP_PASSWORD)  -> sees everything, no allowance limit
+//   APP_USERS="maria:her-password:20;john:his-password:15"  -> name:password:allowanceUsd, separated by ;
+function buildUsers({ adminPassword, usersEnv }) {
+  const users = [];
+  if (adminPassword) {
+    users.push({ id: 'admin', name: 'Admin', role: 'admin', password: adminPassword });
+  }
+  for (const part of String(usersEnv || '').split(';')) {
+    const [name, password, allowance] = part.split(':').map((s) => (s || '').trim());
+    if (!name || !password) continue;
+    const id = 'u-' + name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (users.some((u) => u.id === id)) continue;
+    users.push({ id, name, role: 'user', password, allowanceUsd: Math.max(0, parseFloat(allowance) || 0) });
+  }
+  return users;
+}
+
+function applyAuth(app, { adminPassword, usersEnv, secret, cookieName = 'app_auth' } = {}) {
+  const users = buildUsers({ adminPassword, usersEnv });
+
+  if (!users.length) {
+    console.warn('No ADMIN_PASSWORD/APP_PASSWORD/APP_USERS set — login gate is disabled, app is publicly accessible.');
+    app.use((req, res, next) => {
+      req.user = { id: 'admin', name: 'Admin', role: 'admin' };
+      next();
+    });
     return;
   }
 
-  const validToken = makeToken(secret || password);
+  const signingSecret = secret || adminPassword || 'dev-secret';
   const maxAge = 60 * 60 * 24 * 30; // 30 days
+  const attempts = new Map(); // ip -> { count, resetAt }
 
   app.use(express.urlencoded({ extended: false }));
 
   app.get('/login', (req, res) => {
-    const error = req.query.error ? '<p class="error">Incorrect password.</p>' : '';
+    const error = req.query.error
+      ? '<p class="error">' + (req.query.error === 'locked' ? 'Too many attempts. Try again in a few minutes.' : 'Incorrect password.') + '</p>'
+      : '';
     res.type('html').send(`<!DOCTYPE html>
 <html>
 <head>
@@ -48,11 +81,23 @@ function applyAuth(app, { password, secret, cookieName = 'app_auth' } = {}) {
   });
 
   app.post('/login', (req, res) => {
-    if (req.body && req.body.password === password) {
-      res.setHeader('Set-Cookie', `${cookieName}=${validToken}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax`);
-      return res.redirect('/');
+    const now = Date.now();
+    const rec = attempts.get(req.ip);
+    if (rec && rec.resetAt > now && rec.count >= 10) {
+      return res.redirect('/login?error=locked');
     }
-    res.redirect('/login?error=1');
+    const supplied = sha((req.body && req.body.password) || '');
+    const user = users.find((u) => crypto.timingSafeEqual(supplied, sha(u.password)));
+    if (!user) {
+      const next = rec && rec.resetAt > now ? rec : { count: 0, resetAt: now + 15 * 60 * 1000 };
+      next.count += 1;
+      attempts.set(req.ip, next);
+      return res.redirect('/login?error=1');
+    }
+    attempts.delete(req.ip);
+    const token = user.id + '.' + hmac(signingSecret, user.id);
+    res.setHeader('Set-Cookie', `${cookieName}=${token}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax`);
+    return res.redirect('/');
   });
 
   app.get('/logout', (req, res) => {
@@ -69,9 +114,16 @@ function applyAuth(app, { password, secret, cookieName = 'app_auth' } = {}) {
 
     const cookies = req.headers.cookie || '';
     const match = cookies.match(new RegExp(`${cookieName}=([^;]+)`));
-    const token = match ? match[1] : null;
-
-    if (token === validToken) return next();
+    const token = match ? match[1] : '';
+    const dot = token.lastIndexOf('.');
+    if (dot > 0) {
+      const id = token.slice(0, dot);
+      const user = users.find((u) => u.id === id);
+      if (user && safeEqual(token.slice(dot + 1), hmac(signingSecret, id))) {
+        req.user = { id: user.id, name: user.name, role: user.role, allowanceUsd: user.allowanceUsd };
+        return next();
+      }
+    }
 
     if (req.path.startsWith('/api/')) {
       return res.status(401).json({ error: 'Unauthorized. Please log in.' });
@@ -80,4 +132,4 @@ function applyAuth(app, { password, secret, cookieName = 'app_auth' } = {}) {
   });
 }
 
-module.exports = { applyAuth };
+module.exports = { applyAuth, buildUsers };

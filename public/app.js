@@ -49,7 +49,7 @@ function updateCostBadge() {
       (state.environment.mode === 'upload' && state.environment.photo ? 1 : 0);
     cost += photos * COST_PER_STYLE_IMAGE_USD;
   }
-  els.costBadge.textContent = `~${cost.toFixed(2)}`;
+  els.costBadge.textContent = `~$${cost.toFixed(2)}`;
 }
 
 // ---------- mode tabs (shared by characters and environment) ----------
@@ -191,7 +191,15 @@ async function refreshBudget() {
   try {
     const res = await fetch('/api/budget');
     const data = await res.json();
-    els.budgetText.textContent = `$${data.remainingUsd.toFixed(2)} left of today's budget`;
+    if (data.mode === 'allowance') {
+      els.budgetText.textContent = `${data.userName}: $${data.remainingUsd.toFixed(2)} balance left`;
+      els.budgetPill.title = `Signed in as ${data.userName}. Total allowance $${data.dailyBudgetUsd.toFixed(2)}`;
+      if (data.remainingUsd < 0.5) {
+        showError('Your balance is used up. You can still view and download your creations. Contact the admin to top up.');
+      }
+    } else {
+      els.budgetText.textContent = `${data.remainingUsd.toFixed(2)} left of today's budget`;
+    }
     els.budgetPill.classList.toggle('low', data.remainingUsd < 1);
   } catch (err) {
     // non-fatal

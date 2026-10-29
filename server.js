@@ -47,7 +47,11 @@ for (const dir of [DATA_DIR, GENERATED_DIR, UPLOADS_DIR]) {
 
 app.use(express.json());
 
-applyAuth(app, { password: process.env.APP_PASSWORD, secret: process.env.SESSION_SECRET });
+applyAuth(app, {
+  adminPassword: process.env.ADMIN_PASSWORD || process.env.APP_PASSWORD,
+  usersEnv: process.env.APP_USERS,
+  secret: process.env.SESSION_SECRET,
+});
 
 // ---------- per-visitor client id ----------
 
@@ -408,24 +412,75 @@ async function condensePrompt(prompt, targetChars) {
 
 // ---------- routes ----------
 
+// ---------- per-person allowance + ownership ----------
+
+const USAGE_FILE = path.join(DATA_DIR, 'usage.json');
+let usageLock = Promise.resolve();
+
+function withUsageLock(fn) {
+  const run = usageLock.then(fn, fn);
+  usageLock = run.catch(() => {});
+  return run;
+}
+
+// Admin sees everything; everyone else only their own creations. Older creations have no owner (admin only).
+function canSee(entry, user) {
+  return !!user && (user.role === 'admin' || entry.owner === user.id);
+}
+
+async function getUserSpent(userId) {
+  const usage = await readJson(USAGE_FILE, {});
+  return usage[userId] || 0;
+}
+
+function addUserSpend(userId, amount) {
+  if (!userId || userId === 'admin' || !amount) return Promise.resolve();
+  return withUsageLock(async () => {
+    const usage = await readJson(USAGE_FILE, {});
+    usage[userId] = (usage[userId] || 0) + amount;
+    await writeJson(USAGE_FILE, usage);
+  });
+}
+
+// Remaining = allowance - already spent - cost of this person's still-running generations.
+async function getUserBalance(user) {
+  const history = await readJson(HISTORY_FILE, []);
+  const spent = await getUserSpent(user.id);
+  const reserved = history
+    .filter((h) => h.owner === user.id && h.status === 'pending')
+    .reduce((sum, h) => sum + (h.costUsd || 0), 0);
+  const allowance = user.allowanceUsd || 0;
+  return { allowanceUsd: allowance, spentUsd: spent, reservedUsd: reserved, remainingUsd: Math.max(0, allowance - spent - reserved) };
+}
+
 app.get('/api/budget', async (req, res) => {
   const spent = await getTodaySpend();
-  res.json({
+  const body = {
     date: todayKeySGT(),
     dailyBudgetUsd: DAILY_BUDGET_USD,
     spentUsd: Number(spent.toFixed(4)),
     remainingUsd: Number(Math.max(0, DAILY_BUDGET_USD - spent).toFixed(4)),
     costPerSecondUsd: COST_PER_SECOND_USD,
     costPerStyleImageUsd: COST_PER_STYLE_IMAGE_USD,
-  });
+    userName: req.user && req.user.name,
+    role: req.user && req.user.role,
+  };
+  if (req.user && req.user.role === 'user') {
+    const bal = await getUserBalance(req.user);
+    body.mode = 'allowance';
+    body.dailyBudgetUsd = bal.allowanceUsd;
+    body.spentUsd = Number(bal.spentUsd.toFixed(4));
+    body.remainingUsd = Number(bal.remainingUsd.toFixed(4));
+  }
+  res.json(body);
 });
 
 app.get('/api/history', async (req, res) => {
   const history = await readJson(HISTORY_FILE, []);
-  // Shared gallery: every visitor sees every finished video. Only non-sensitive fields are exposed.
+  // Each person sees only their own creations (admin sees all). Only non-sensitive fields are exposed.
   res.json(
     history
-      .filter((entry) => entry.status === 'success')
+      .filter((entry) => entry.status === 'success' && canSee(entry, req.user))
       .map((e) => ({
         id: e.id,
         status: e.status,
@@ -444,7 +499,7 @@ app.get('/api/history', async (req, res) => {
 app.get('/api/history/:id', async (req, res) => {
   const history = await readJson(HISTORY_FILE, []);
   const e = history.find((h) => h.id === req.params.id && h.status === 'success');
-  if (!e) return res.status(404).json({ error: 'Not found.' });
+  if (!e || !canSee(e, req.user)) return res.status(404).json({ error: 'Not found.' });
   res.json({
     id: e.id,
     resultUrl: e.resultUrl,
@@ -461,7 +516,7 @@ app.get('/api/history/:id', async (req, res) => {
 
 app.get('/api/status/:id', async (req, res) => {
   const history = await readJson(HISTORY_FILE, []);
-  const entry = history.find((h) => h.id === req.params.id && h.clientId === req.clientId);
+  const entry = history.find((h) => h.id === req.params.id && canSee(h, req.user));
   if (!entry) {
     return res.status(404).json({ error: 'Story not found.' });
   }
@@ -505,7 +560,7 @@ async function createStyledReference({ photoUrl, artStyle, kind, origin, tempUpl
   return origin + '/uploads/' + fileName;
 }
 
-async function processStory({ id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, origin, tempUploadPaths }) {
+async function processStory({ id, owner, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, origin, tempUploadPaths }) {
   try {
     const startedAt = Date.now();
     let styledCount = 0;
@@ -590,6 +645,7 @@ async function processStory({ id, story, duration, characters, environment, artS
     await downloadToFile(resultVideoUrl, path.join(GENERATED_DIR, destFile));
     const actualCost = duration * COST_PER_SECOND_USD + styledCount * COST_PER_STYLE_IMAGE_USD;
     const newTotal = await addSpend(actualCost);
+    await addUserSpend(owner, actualCost);
 
     await updateHistoryEntry(id, {
       status: 'success',
@@ -710,6 +766,7 @@ app.post(
       const entry = {
         id,
         clientId: req.clientId,
+        owner: req.user.id,
         createdAt: new Date().toISOString(),
         story,
         duration,
@@ -723,11 +780,26 @@ app.post(
         stage: 'starting',
         costUsd: estimatedCost,
       };
-      await appendHistory(entry);
+      if (req.user.role === 'user') {
+        // Check the balance and record the pending generation together so two requests can't both overspend.
+        const short = await withUsageLock(async () => {
+          const bal = await getUserBalance(req.user);
+          if (estimatedCost > bal.remainingUsd + 1e-9) return bal;
+          await appendHistory(entry);
+          return null;
+        });
+        if (short) {
+          return res.status(402).json({
+            error: `Not enough balance: this video needs about $${estimatedCost.toFixed(2)} but you have $${short.remainingUsd.toFixed(2)} left. Contact the admin to top up.`,
+          });
+        }
+      } else {
+        await appendHistory(entry);
+      }
 
       res.json({ id, status: 'pending' });
 
-      processStory({ id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, origin, tempUploadPaths });
+      processStory({ id, owner: req.user.id, story, duration, characters, environment, artStyle, aspectRatio, estimatedCost, origin, tempUploadPaths });
     } catch (err) {
       console.error('generate error:', err);
       for (const p of tempUploadPaths) {
@@ -760,7 +832,7 @@ app.delete('/api/history/:id', async (req, res) => {
   }
   const history = await readJson(HISTORY_FILE, []);
   const entry = history.find((h) => h.id === id);
-  if (!entry) {
+  if (!entry || !canSee(entry, req.user)) {
     return res.status(404).json({ error: 'Creation not found.' });
   }
   if (entry.status === 'pending') {
@@ -808,6 +880,7 @@ async function recoverInterruptedJobs() {
         const destFile = e.id + '.mp4';
         await downloadToFile(videoUrl, path.join(GENERATED_DIR, destFile));
         const total = await addSpend(e.costUsd || 0);
+        await addUserSpend(e.owner, e.costUsd || 0);
         await updateHistoryEntry(e.id, {
           status: 'success',
           stage: 'done',
