@@ -555,3 +555,37 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
+
+.prompt-details .input-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0 10px;
+}
+.prompt-details .input-card {
+  width: 92px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.prompt-details .input-card img {
+  width: 92px;
+  height: 92px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.prompt-details .input-desc {
+  width: 92px;
+  min-height: 92px;
+  max-height: 120px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text);
+}

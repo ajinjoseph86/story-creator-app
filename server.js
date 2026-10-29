@@ -453,6 +453,7 @@ app.get('/api/history/:id', async (req, res) => {
     artStyle: e.artStyle,
     promptText: e.story,
     finalPrompt: e.finalPrompt,
+    inputs: e.inputs,
   });
 });
 
@@ -467,6 +468,18 @@ app.get('/api/status/:id', async (req, res) => {
 
 // Runs after the HTTP response has already been sent — writing the prompt plus generating a
 // 15-30s video easily takes longer than any reverse-proxy timeout would allow.
+// Small preview copies of the photos used for a generation, kept alongside the video so the gallery
+// can show what went in. The full-size staged uploads are still deleted after generation.
+async function saveInputThumb(buffer) {
+  const name = 'in-' + uuidv4() + '.jpg';
+  await sharp(buffer)
+    .rotate()
+    .resize({ width: 480, height: 480, fit: 'inside', withoutEnlargement: true })
+    .jpeg({ quality: 72 })
+    .toFile(path.join(GENERATED_DIR, name));
+  return '/generated/' + name;
+}
+
 async function createStyledReference({ photoUrl, artStyle, kind, origin, tempUploadPaths }) {
   const prompt = kind === 'environment'
     ? 'Redraw the location in the reference photo as a ' + artStyle + ' environment: keep the same layout, architecture, ' +
@@ -647,7 +660,7 @@ app.post(
           if (!file) {
             return res.status(400).json({ error: `Upload a photo for Character ${i}, or switch it to Describe.` });
           }
-          characters.push({ label, mode: 'upload', imageUrl: await saveReferenceImage(file) });
+          characters.push({ label, mode: 'upload', imageUrl: await saveReferenceImage(file), thumbUrl: await saveInputThumb(file.buffer) });
         } else {
           const description = (req.body[`character${i}Description`] || '').trim();
           if (!description) {
@@ -665,7 +678,7 @@ app.post(
         if (!file) {
           return res.status(400).json({ error: 'Upload an environment photo, or switch it to Describe/Not used.' });
         }
-        environment = { mode: 'upload', imageUrl: await saveReferenceImage(file) };
+        environment = { mode: 'upload', imageUrl: await saveReferenceImage(file), thumbUrl: await saveInputThumb(file.buffer) };
       } else if (envMode === 'describe') {
         const description = (req.body.environmentDescription || '').trim();
         if (!description) {
@@ -697,6 +710,10 @@ app.post(
         duration,
         artStyle,
         aspectRatio,
+        inputs: {
+          characters: characters.map((c) => ({ label: c.label, mode: c.mode, thumbUrl: c.thumbUrl, description: c.description })),
+          environment: environment ? { mode: environment.mode, thumbUrl: environment.thumbUrl, description: environment.description } : null,
+        },
         status: 'pending',
         stage: 'starting',
         costUsd: estimatedCost,

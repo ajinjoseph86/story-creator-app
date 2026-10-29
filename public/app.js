@@ -208,6 +208,21 @@ function escapeHtml(value) {
 
 const promptDetailsEl = document.getElementById('prompt-details');
 
+function renderInputs(inputs) {
+  if (!inputs) return '';
+  const card = (label, thumbUrl, description) =>
+    '<div class="input-card">' +
+      (thumbUrl
+        ? '<img src="' + escapeHtml(thumbUrl) + '" alt="' + escapeHtml(label) + '" />'
+        : '<div class="input-desc">' + escapeHtml(description || '') + '</div>') +
+      '<span>' + escapeHtml(label) + (thumbUrl ? '' : ' (described)') + '</span>' +
+    '</div>';
+  const parts = (inputs.characters || []).map((c, i) => card(c.label || 'Character ' + (i + 1), c.thumbUrl, c.description));
+  if (inputs.environment) parts.push(card('Environment', inputs.environment.thumbUrl, inputs.environment.description));
+  if (!parts.length) return '';
+  return '<h3>Used inputs</h3><div class="input-grid">' + parts.join('') + '</div>';
+}
+
 function renderPromptDetails(info) {
   const meta = [
     info.artStyle,
@@ -221,7 +236,7 @@ function renderPromptDetails(info) {
     : '';
   promptDetailsEl.innerHTML =
     '<h3>Prompt</h3><div class="prompt-meta">' + meta + '</div>' +
-    '<p class="prompt-text">' + escapeHtml(info.promptText || '') + '</p>' + finalBlock;
+    '<p class="prompt-text">' + escapeHtml(info.promptText || '') + '</p>' + renderInputs(info.inputs) + finalBlock;
   promptDetailsEl.classList.remove('hidden');
   const copyBtn = document.getElementById('copy-final-prompt');
   if (copyBtn) {
@@ -240,6 +255,7 @@ async function showPromptDetails(entry) {
     aspectRatio: entry.aspectRatio,
     duration: entry.duration,
     createdAt: entry.createdAt,
+    inputs: entry.inputs,
   });
   if (entry.finalPrompt || entry.finalPrompt) return;
   try {
